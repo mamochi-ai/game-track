@@ -16,7 +16,7 @@
   const SHOCK_STEPS = 6; // 50 ms window at 120 Hz
 
   // collision categories
-  const CAT = { ANY: 0x0001, DOOR: 0x0002, MELON: 0x0004, PAD: 0x0008 };
+  const CAT = { ANY: 0x0001, DOOR: 0x0002, MELON: 0x0004, PAD: 0x0008, GROUND: 0x0010 };
 
   const HOOKS = [
     { px: 22, py: 262, name: '後部フック' },
@@ -304,7 +304,7 @@
     buildGround() {
       const g = this.world.createBody({ type: 'static' });
       g.setUserData({ kind: 'ground' });
-      g.createFixture({ shape: new pl.Chain(this.course.pts, false), friction: 0.9, restitution: 0.05 });
+      g.createFixture({ shape: new pl.Chain(this.course.pts, false), friction: 0.9, restitution: 0.05, filterCategoryBits: CAT.GROUND });
       this.ground = g;
     }
 
@@ -924,6 +924,11 @@
             for (let ce = b.getContactList(); ce; ce = ce.next) {
               if (ce.contact.isTouching() && ce.other === this.ground) {
                 ud.fallen = true;
+                // small things on the road (balls, melons, the robot) stay on the road but can no
+                // longer wedge under a wheel and jam the truck
+                if (b.getMass() < 5) {
+                  for (let f = b.getFixtureList(); f; f = f.getNext()) f.setFilterData({ groupIndex: 0, categoryBits: f.getFilterCategoryBits(), maskBits: CAT.GROUND });
+                }
                 if (b === it.bodies.root) { it.fallen = true; this.emit('fall', { id: it.id }); }
                 else if (ud.part.startsWith('melon')) this.emit('melon-fall', { id: it.id });
                 break;

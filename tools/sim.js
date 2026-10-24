@@ -391,3 +391,20 @@ if (scenario === 'cranedbg') {
     }
   }
 }
+if (scenario === 'stuck2') {
+  const n = Number(process.argv[3] || 1), v = Number(process.argv[4] || 5);
+  const st = STAGE(n);
+  const sim = loaded(st, st.recommended);
+  const pol = careful(v);
+  let lastX = 0, still = 0;
+  while (sim.driveTime < 80) {
+    Object.assign(sim.controls, pol(sim, sim.chassis.getPosition().x));
+    sim.step(H); sim.events.length = 0;
+    const x = sim.chassis.getPosition().x;
+    still = Math.abs(x - lastX) < 0.001 ? still + H : 0; lastX = x;
+    if (still > 3) break;
+  }
+  console.log('x', sim.chassis.getPosition().x.toFixed(2), 'v', sim.speed().toFixed(2), 'thr', sim.throttle.toFixed(2), 'ang', (sim.chassis.getAngle() * 57.3).toFixed(1));
+  for (const b of [sim.chassis, ...sim.wheels]) for (let ce = b.getContactList(); ce; ce = ce.next) if (ce.contact.isTouching()) { const ud = ce.other.getUserData(); console.log(b.getUserData().kind, 'touches', ud.kind, ud.item ? ud.item.spec.name + ':' + ud.part + ' fallen=' + !!ce.other.getUserData().fallen : ''); }
+  console.log('wheel joint speeds', sim.wheelJoints.map((j) => j.getJointSpeed().toFixed(2)), 'motor torque', sim.wheelJoints.map((j) => j.getMotorTorque(120).toFixed(0)));
+}

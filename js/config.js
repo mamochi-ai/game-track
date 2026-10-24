@@ -148,7 +148,6 @@ window.CONFIG = {
           { id: 6, x: 1.80, a: 0 },
           { id: 7, x: 0.50, a: 0 },     // tire on the fridge
           { id: 11, x: 0.86, a: 0 },    // bowling ball in the notch between fridge and boxes
-          { id: 12, x: 1.18, a: 0 },    // and a rubber ball on top, why not
         ],
         belts: [
           { hook: 2, id: 0, part: 'root', u: -0.3, v: 0.3 },  // bed middle -> fridge body (the doors stay free)
@@ -183,7 +182,6 @@ window.CONFIG = {
           { id: 0, x: 0.75, a: 90 },    // fridge lying on the sofa, doors facing up
           { id: 2, x: 0.72, a: 0 },     // the cat sitting on the fridge doors, paw towards the front stack
           { id: 4, x: 1.86, a: 0 },     // big box on top of the front stack: right in the paw's way
-          { id: 13, x: 1.86, a: 0 },
         ],
         belts: [
           { hook: 2, id: 0, u: 0.1, v: 0 },      // bed middle -> fridge body
