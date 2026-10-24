@@ -22,9 +22,10 @@
   <!-- 積み込み -->
   <section id="load-ui" class="layer" hidden>
     <header class="topbar">
-      <button id="btn-home" class="icon-btn" aria-label="タイトルへ戻る">
+      <button id="btn-home" class="icon-btn" aria-label="ステージ選択へ戻る">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5M6 10v9h4.5v-5h3v5H18v-9"/></svg>
       </button>
+      <p class="stage-label" id="stage-label"></p>
       <ol class="steps" aria-label="手順">
         <li id="step-load" class="on">1 積む</li>
         <li id="step-belt">2 固定</li>
@@ -110,17 +111,28 @@
       <h1>一便で<br>いけます。</h1>
       <p class="lead">小さなトラックに、全部。段差と坂と、なぜか巨大な磁石を越えて届けます。</p>
       <div class="title-actions">
-        <button id="btn-start" class="go big">積み込みをはじめる</button>
+        <button id="btn-start" class="go big">現場をえらぶ</button>
         <button class="btn sound-btn sound-text" aria-label="音のオン・オフ"><span class="snd-on">音: オン</span><span class="snd-off">音: オフ</span></button>
         <button id="btn-howto" class="btn">遊び方</button>
       </div>
       <div id="howto" class="howto" hidden>
         <ol>
-          <li><b>積む</b> 一覧から荷物を選び、指で動かして離すと落ちます。赤いときは置けません。</li>
-          <li><b>固定</b> ベルトは3本。フック → 荷物の順に押します。張るほど色が赤くなります。</li>
-          <li><b>運ぶ</b> 右下アクセル、左下ブレーキ。旗の間で止まると配達です。</li>
+          <li><b>積む</b> 一覧から荷物を選び、指で動かして離すと落ちます。赤いときは置けません。左右ボタンで回転。</li>
+          <li><b>固定</b> ベルトは3本。フック → 荷物の順に押します。扉や腕も直接留められます。</li>
+          <li><b>運ぶ</b> 右下アクセル、左下ブレーキ。坂の頂上と下り坂は速度に注意。旗の間で止まると配達です。</li>
           <li><b>もう一度</b> 同じ積み方のまま、運転だけ変えて何度でも試せます。</li>
         </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="stages" class="overlay dim" hidden>
+    <div class="card stages-card">
+      <p class="eyebrow">ステージ選択</p>
+      <h2>今日の現場</h2>
+      <div id="stage-list" class="stage-list"></div>
+      <div class="card-actions">
+        <button id="btn-stages-back" class="btn quiet">タイトルへ</button>
       </div>
     </div>
   </section>
@@ -132,6 +144,7 @@
         <button id="btn-resume" class="go">運転にもどる</button>
         <button id="btn-pause-retry" class="btn">同じ積み方でもう一度</button>
         <button id="btn-pause-reload" class="btn">積み込みに戻って修正</button>
+        <button id="btn-pause-stages" class="btn quiet">ステージ選択へ</button>
       </div>
     </div>
   </section>
@@ -150,20 +163,25 @@
 
   <section id="result" class="overlay dim" hidden>
     <div class="card result-card">
-      <p class="eyebrow">配達結果</p>
+      <p class="eyebrow">配達結果 <span id="res-best" class="best"></span></p>
       <h2 id="result-title">だいたい届きました。</h2>
-      <p class="value-line"><span>配達価値</span><b id="res-value">¥0</b><small id="res-max"></small></p>
+      <p class="value-line"><span>配達価値</span><b id="res-value">¥0</b><span id="res-stars" class="res-stars">☆☆☆</span></p>
+      <p class="res-sub"><small id="res-max"></small></p>
+      <p class="res-clear" id="res-clear"></p>
       <dl class="stats">
         <div><dt>配達</dt><dd id="res-delivered">0</dd></div>
         <div><dt>落とした</dt><dd id="res-lost">0</dd></div>
         <div><dt>未積載</dt><dd id="res-unloaded">0</dd></div>
+        <div><dt>追加荷物</dt><dd id="res-bonus">—</dd></div>
         <div><dt>時間</dt><dd id="res-time">0</dd></div>
       </dl>
-      <ul id="res-items" class="res-items" aria-label="届いた荷物"></ul>
+      <ul id="res-items" class="res-items" aria-label="荷物ごとの結果"></ul>
+      <p class="res-notes" id="res-notes"></p>
       <div class="card-actions">
-        <button id="btn-res-retry" class="go">同じ積み方でもう一度</button>
+        <button id="btn-res-next" class="go" hidden>次のステージへ</button>
+        <button id="btn-res-retry" class="go alt">同じ積み方でもう一度</button>
         <button id="btn-res-reload" class="btn">積み込みに戻って修正</button>
-        <button id="btn-res-title" class="btn quiet">タイトルへ</button>
+        <button id="btn-res-stages" class="btn quiet">ステージ選択へ</button>
       </div>
     </div>
   </section>

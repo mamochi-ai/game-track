@@ -1,38 +1,219 @@
 {
  "truck": {
   "w": 752,
-  "h": 327
+  "h": 327,
+  "sheet": "assets/source/sheet.png",
+  "x0": 5,
+  "y0": 25
  },
  "magnet_truck": {
   "w": 749,
-  "h": 339
+  "h": 339,
+  "sheet": "assets/source/sheet.png",
+  "x0": 779,
+  "y0": 14
  },
  "fridge": {
   "w": 214,
-  "h": 369
+  "h": 369,
+  "sheet": "assets/source/sheet.png",
+  "x0": 697,
+  "y0": 363
  },
  "wheel": {
   "w": 267,
-  "h": 269
+  "h": 269,
+  "sheet": "assets/source/sheet.png",
+  "x0": 55,
+  "y0": 442
  },
  "sofa": {
   "w": 535,
-  "h": 252
+  "h": 252,
+  "sheet": "assets/source/sheet.png",
+  "x0": 977,
+  "y0": 458
  },
  "box": {
   "w": 220,
-  "h": 234
+  "h": 234,
+  "sheet": "assets/source/sheet.png",
+  "x0": 407,
+  "y0": 463
  },
  "cat": {
   "w": 298,
-  "h": 327
+  "h": 327,
+  "sheet": "assets/source/sheet.png",
+  "x0": 1189,
+  "y0": 691
  },
  "tire": {
   "w": 263,
-  "h": 265
+  "h": 265,
+  "sheet": "assets/source/sheet.png",
+  "x0": 64,
+  "y0": 747
  },
  "plank": {
   "w": 662,
-  "h": 120
+  "h": 120,
+  "sheet": "assets/source/sheet.png",
+  "x0": 426,
+  "y0": 830
+ },
+ "worker_push": {
+  "w": 413,
+  "h": 400,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 50,
+  "y0": 10
+ },
+ "worker_press": {
+  "w": 424,
+  "h": 393,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 555,
+  "y0": 19
+ },
+ "worker_thumb": {
+  "w": 333,
+  "h": 415,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 1078,
+  "y0": 4
+ },
+ "crane_body": {
+  "w": 562,
+  "h": 246,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 27,
+  "y0": 426
+ },
+ "crane_boom": {
+  "w": 692,
+  "h": 138,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 614,
+  "y0": 462
+ },
+ "crane_hook": {
+  "w": 144,
+  "h": 330,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 1360,
+  "y0": 388
+ },
+ "fragile_box": {
+  "w": 373,
+  "h": 317,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 32,
+  "y0": 687
+ },
+ "shed": {
+  "w": 430,
+  "h": 312,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 444,
+  "y0": 682
+ },
+ "magnet_sign": {
+  "w": 200,
+  "h": 336,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 908,
+  "y0": 657
+ },
+ "lift_block": {
+  "w": 411,
+  "h": 239,
+  "sheet": "assets/source/sheet2.png",
+  "x0": 1104,
+  "y0": 744
+ },
+ "fridge_body": {
+  "w": 265,
+  "h": 393,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 326,
+  "y0": 17
+ },
+ "fridge_door_top": {
+  "w": 246,
+  "h": 167,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 632,
+  "y0": 16
+ },
+ "fridge_door_bottom": {
+  "w": 253,
+  "h": 224,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 632,
+  "y0": 187
+ },
+ "watermelon": {
+  "w": 291,
+  "h": 289,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 930,
+  "y0": 114
+ },
+ "sofa_cushion": {
+  "w": 517,
+  "h": 139,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 600,
+  "y0": 543
+ },
+ "cat_body": {
+  "w": 282,
+  "h": 321,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 1133,
+  "y0": 414
+ },
+ "cat_arm": {
+  "w": 95,
+  "h": 156,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 1417,
+  "y0": 478
+ },
+ "bowling": {
+  "w": 239,
+  "h": 239,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 37,
+  "y0": 747
+ },
+ "rubber_ball": {
+  "w": 235,
+  "h": 234,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 299,
+  "y0": 748
+ },
+ "shelf": {
+  "w": 291,
+  "h": 278,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 557,
+  "y0": 716
+ },
+ "robot": {
+  "w": 288,
+  "h": 111,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 870,
+  "y0": 867
+ },
+ "open_box": {
+  "w": 393,
+  "h": 257,
+  "sheet": "assets/source/sheet3.png",
+  "x0": 1133,
+  "y0": 744
  }
 }

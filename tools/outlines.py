@@ -19,6 +19,19 @@ REGIONS = {
     'cat': [(0, 0.74, 0, 0.42), (0.74, 1, 0, 0.40), (0, 1, 0.40, 1)],  # head / raised paw / body
     'plank': FULL,
     'tire': None,
+    'fridge_body': FULL,
+    'fridge_door_top': FULL,
+    'fridge_door_bottom': FULL,
+    'watermelon': None,
+    'bowling': None,
+    'rubber_ball': None,
+    'cat_body': [(0, 1, 0, 0.45), (0, 1, 0.42, 1)],      # head / body
+    'cat_arm': FULL,
+    'sofa_cushion': FULL,
+    'fragile_box': FULL,
+    'shelf': [(0, 1, 0, 0.9)],                          # cabinet (casters are separate circles)
+    'robot': FULL,
+    'lift_block': [(0.25, 0.68, 0, 0.42), (0, 1, 0.38, 1)],  # lifting lug / block
 }
 
 

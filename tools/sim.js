@@ -1,5 +1,8 @@
-// Headless physics checks: node tools/sim.js [scenario]
-// Loads the same scripts the browser loads (planck, config, outlines, physics) into a VM context.
+// Headless physics checks: node tools/sim.js <scenario> [args]
+// Loads the same scripts the browser loads into a VM context.
+//   units                 special cargo one by one (fridge, sofa, cat, robot, fragile, magnet, worker, crane)
+//   stage <n> [layout]    drive stage n with the recommended load: floored vs careful driving
+//   snap <n> <file> [x]   dump the recommended load (and optionally the scene at truck x) for tools/snap.py
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -12,137 +15,241 @@ vm.createContext(ctx);
 for (const f of ['js/vendor/planck.min.js', 'js/outlines.js', 'js/config.js', 'js/physics.js', 'js/layout.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const { Phys, CONFIG: C, Layout } = ctx;
+const { Phys, CONFIG: C, Layout, planck: pl } = ctx;
 const H = 1 / C.physics.hz;
+const STAGE = (n) => C.stages[n - 1];
 
-function summary(sim, label) {
-  const sup = sim.supportedIds();
-  const loaded = sim.loadedItems();
-  const fallen = loaded.filter((it) => it.fallen).length;
-  const ch = sim.chassis.getPosition();
-  console.log(`${label}: t=${sim.time.toFixed(1)}s x=${ch.x.toFixed(1)} v=${sim.speed().toFixed(2)} ang=${(sim.chassis.getAngle() * 57.3).toFixed(1)}deg loaded=${loaded.length} onTruck=${sup.size} fallen=${fallen}`);
+function loaded(stage, layout, settle = 2.5) {
+  const sim = new Phys.Sim(stage, null);
+  if (layout) Layout.apply(sim, layout);
+  sim.settle(settle);
+  const s2 = new Phys.Sim(stage, sim.snapshot()); // depart from a clean rebuild, like the game
+  s2.startDriving();
+  return s2;
 }
 
-function pileTop(sim) {
-  let top = -1e9;
-  for (const it of sim.loadedItems()) {
-    const p = it.body.getPosition();
-    top = Math.max(top, p.y + it.spec.size[1] / 2);
-  }
-  return top;
+function result(sim) {
+  const units = sim.scoreUnits();
+  const del = units.filter((u) => u.delivered);
+  return { value: del.reduce((s, u) => s + u.value, 0), delivered: del.length, total: units.length, bonus: del.some((u) => u.bonus) };
 }
 
-function drive(sim, policy, maxT = 150, log = true) {
-  sim.phase = 'driving';
+// drive until stopped in the goal (or timeout); returns summary
+function drive(sim, policy, maxT = 200, quiet = false) {
+  const c = sim.course;
   let hold = 0;
-  let lastLog = 0;
-  const events = [];
-  const wasFallen = new Set();
-  while (sim.time < maxT) {
+  const log = [];
+  while (sim.driveTime < maxT) {
     const x = sim.chassis.getPosition().x;
     Object.assign(sim.controls, policy(sim, x));
     sim.step(H);
-    for (const it of sim.loadedItems()) {
-      if (it.fallen && !wasFallen.has(it.id)) {
-        wasFallen.add(it.id);
-        events.push(`${it.spec.name}#${it.id} fell at x=${x.toFixed(1)} t=${sim.time.toFixed(1)}`);
+    for (const e of sim.events.splice(0)) {
+      if (e.type === 'cat-bell' || e.type === 'cat-swing' || e.type === 'robot-turn') continue;
+      const nm = e.id != null ? sim.item(e.id).spec.name : '';
+      log.push(`${e.type}${nm ? '(' + nm + ')' : ''}@x${x.toFixed(0)}`);
+    }
+    if (x > c.goalStart && x < c.goalEnd + 1 && Math.abs(sim.speed()) < 0.45 && Math.abs(sim.chassis.getAngle()) < 0.8) {
+      hold += H;
+      if (hold > 1.2) break;
+    } else hold = 0;
+    if (Math.abs(sim.chassis.getAngle()) > 1.4) { log.push('ROLLED'); break; }
+  }
+  const r = result(sim);
+  if (!quiet) console.log(`   t=${sim.driveTime.toFixed(0)}s x=${sim.chassis.getPosition().x.toFixed(0)} value=¥${r.value} delivered ${r.delivered}/${r.total}${r.bonus ? ' +bonus' : ''}\n   ${log.join(' ')}`);
+  return r;
+}
+
+const floored = () => ({ throttle: true, brake: false });
+// a reasonable driver: cruise, ease off over the crest and downhill, stop in the goal, optionally wait for the crane
+const careful = (v, opts = {}) => (sim, x) => {
+  const c = sim.course, m = c.marks;
+  const speed = sim.speed();
+  let target = v;
+  if (m.crestTop && x > m.crestTop - 14 && x < m.crestTop + 16) target = Math.min(target, 2.5);
+  if (x > c.goalStart - 45) target = Math.min(target, 3.2);
+  if (m.worker && opts.stopForWorker && Math.abs(x - 0.6 - m.worker) < 6) target = Math.min(target, 1.2);
+  if (m.crane && opts.waitCrane && sim.crane && sim.crane.state !== 'released' && x < m.crane + 3) {
+    const bed = sim.chassis.getWorldPoint(pl.Vec2(Phys.BED.center, 0)).x;
+    target = Math.min(target, Math.max(0, (m.crane - bed) * 0.8));
+  }
+  if (x > c.goalStart + 8) target = 0;
+  return { throttle: speed < target - 0.15, brake: speed > target + 0.9 || (target === 0 && speed > 0.05) };
+};
+
+const scenario = process.argv[2] || 'units';
+
+// ------------------------------------------------------------------ unit checks
+function unitStage(manifest, events) {
+  return { id: 99, name: 'test', norm: 0, manifest, events: events || {}, course: [['flat', 200], ['goal', 30]] };
+}
+function bedPose(sim, u, a = 0) {
+  const p = sim.chassis.getWorldPoint(pl.Vec2(Phys.BED.rear + u, Phys.BED.floorY));
+  return p;
+}
+function place(sim, id, u, deg = 0) {
+  const p = bedPose(sim, u);
+  const a = (deg * Math.PI) / 180;
+  const y = sim.dropHeight(id, p.x, a);
+  sim.placeItem(id, { x: p.x, y, a });
+}
+function run(sim, secs, ctrl) {
+  const ev = [];
+  for (let t = 0; t < secs; t += H) {
+    if (ctrl) Object.assign(sim.controls, ctrl(sim.driveTime));
+    sim.step(H);
+    ev.push(...sim.events.splice(0).map((e) => e.type));
+  }
+  return ev;
+}
+// jolt: brake hard from speed
+const launchBrake = (tb) => (t) => (t < tb ? { throttle: true, brake: false } : { throttle: false, brake: true });
+
+if (scenario === 'units') {
+  // fridge: hard stop pops the catch; melons roll out; blocked door keeps them in
+  for (const blocked of [false, true]) {
+    const st = unitStage([{ type: 'fridge' }, { type: 'box', box: 'L' }]);
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.5);
+    if (blocked) place(sim, 1, 1.25);
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const ev = run(sim, 6, launchBrake(2.6));
+    const it = sim.item(0);
+    const melonsOut = Object.keys(it.bodies).filter((k) => k.startsWith('melon')).filter((k) => {
+      const l = it.bodies.root.getLocalPoint(it.bodies[k].getPosition());
+      return Math.abs(l.x) > 0.4 || Math.abs(l.y) > 0.6;
+    }).length;
+    console.log(`fridge ${blocked ? 'door blocked' : 'free      '}: maxShock=${it.st.maxShock.toFixed(0)} events=[${[...new Set(ev)].join(',')}] door angles=${['door0', 'door1'].map((k) => it.joints[k].getJointAngle().toFixed(2))} melons out=${melonsOut}`);
+  }
+  // sofa bed: jolt unfolds, a box on the right blocks it partway
+  for (const blocked of [false, true]) {
+    const st = unitStage([{ type: 'sofabed' }, { type: 'box', box: 'L' }]);
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.82);
+    if (blocked) { const p = bedPose(sim, 1.85); sim.placeItem(1, { x: p.x, y: sim.dropHeight(1, p.x, 0), a: 0 }); }
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const ev = run(sim, 6, launchBrake(2.6));
+    const it = sim.item(0);
+    console.log(`sofabed ${blocked ? 'blocked' : 'free   '}: maxShock=${it.st.maxShock.toFixed(0)} events=[${[...new Set(ev)].join(',')}] cushion angle=${it.joints.cushion.getJointAngle().toFixed(2)}`);
+  }
+  // cat: arm pushes a box; with a plank wedged the arm stalls without blowing up
+  {
+    const st = unitStage([{ type: 'cat' }, { type: 'box', box: 'L' }, { type: 'box', box: 'M' }]);
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.6);
+    place(sim, 1, 1.42);
+    place(sim, 2, 1.42); // a stack as tall as the cat's shoulder
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const box = sim.item(2).bodies.root;
+    const x0 = sim.chassis.getLocalPoint(box.getPosition()).x;
+    const ev = run(sim, 5.2, () => ({ throttle: false, brake: true }));
+    const x1 = sim.chassis.getLocalPoint(box.getPosition()).x;
+    let maxV = 0;
+    run(sim, 10, () => ({ throttle: false, brake: true }));
+    for (const b of Object.values(sim.item(0).bodies)) maxV = Math.max(maxV, b.getAngularVelocity());
+    console.log(`cat: events=[${[...new Set(ev)].join(',')}] box pushed ${(x1 - x0).toFixed(2)} m, arm angle now ${sim.item(0).joints.arm.getJointAngle().toFixed(2)}`);
+  }
+  // robot box: jolt opens it, robot drives out and turns at the headboard
+  {
+    const st = unitStage([{ type: 'robotbox' }]);
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.6);
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const ev = run(sim, 3.2, launchBrake(2.0));
+    const r = sim.item(0).bodies.robot;
+    const xs = [];
+    for (let i = 0; i < 12; i++) { run(sim, 0.5, () => ({ throttle: false, brake: true })).forEach((e) => ev.push(e)); xs.push(sim.chassis.getLocalPoint(r.getPosition()).x.toFixed(2)); }
+    console.log(`robot: maxShock=${sim.item(0).st.maxShock.toFixed(0)} events=[${[...new Set(ev)].join(',')}] robot local x: ${xs.join(' ')}`);
+  }
+  // fragile: upside down floats up after a second; a belt holds it
+  for (const belted of [false, true]) {
+    const st = unitStage([{ type: 'fragile' }]);
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 1.0, 180);
+    if (belted) sim.addBelt(2, 0, 'root', pl.Vec2(0, -0.2));
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const y0 = sim.item(0).bodies.root.getPosition().y;
+    const ev = run(sim, 3, () => ({ throttle: false, brake: true }));
+    const b = sim.item(0).bodies.root;
+    console.log(`fragile ${belted ? 'belted' : 'loose '}: events=[${[...new Set(ev)].join(',')}] rose ${(b.getPosition().y - y0).toFixed(2)} m, vy=${b.getLinearVelocity().y.toFixed(2)}${belted ? ' belt tension=' + sim.belts[0].tension.toFixed(0) + 'N' : ''}`);
+  }
+  // magnet: only the fridge feels it
+  {
+    const st = unitStage([{ type: 'fridge' }, { type: 'box', box: 'L' }, { type: 'bowling' }], { magnet: true });
+    st.course = [['flat', 20], ['mark', 'magnetTrigger'], ['flat', 10], ['mark', 'magnetPark'], ['flat', 200], ['goal', 30]];
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.5); place(sim, 1, 1.5); place(sim, 2, 1.0);
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    sim.magnet.moving = true; sim.magnet.x = sim.chassis.getPosition().x + 14;
+    const maxF = {};
+    for (let t = 0; t < 6; t += H) { sim.controls = { throttle: false, brake: true }; sim.step(H); for (const it of sim.items) if (it.magnetForce) maxF[it.spec.name] = Math.max(maxF[it.spec.name] || 0, it.magnetForce); }
+    console.log(`magnet: max force by item ${JSON.stringify(maxF)} (fridge only expected)`);
+  }
+  // worker: stop under the bridge, he presses, suspension sinks, release bounces the load
+  {
+    const st = unitStage([{ type: 'box', box: 'L' }, { type: 'box', box: 'M' }, { type: 'ball' }], { worker: true });
+    st.course = [['flat', 20], ['mark', 'worker'], ['flat', 200], ['goal', 30]];
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 1.0); place(sim, 1, 1.0); place(sim, 2, 1.0);
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot());
+    // park the bed centre under the bridge
+    sim.startDriving();
+    const ev = [];
+    let minTravel = 1, maxBoxVy = 0, maxBallVy = 0;
+    for (let t = 0; t < 14; t += H) {
+      const bed = sim.chassis.getWorldPoint(pl.Vec2(Phys.BED.center, 0)).x;
+      sim.controls = bed < sim.course.marks.worker - 0.2 ? { throttle: sim.speed() < 1.5, brake: false } : { throttle: false, brake: true };
+      sim.step(H);
+      ev.push(...sim.events.splice(0).map((e) => e.type));
+      minTravel = Math.min(minTravel, sim.wheelJoints[0].getJointTranslation());
+      if (sim.worker.state === 'lifting' || sim.worker.state === 'done') {
+        maxBoxVy = Math.max(maxBoxVy, sim.item(0).bodies.root.getLinearVelocity().y);
+        maxBallVy = Math.max(maxBallVy, sim.item(2).bodies.root.getLinearVelocity().y);
       }
     }
-    if (log && sim.time - lastLog > 10) { lastLog = sim.time; summary(sim, '  drive'); }
-    if (x > C.course.goalStart && x < C.course.goalEnd && Math.abs(sim.speed()) < C.course.goalSpeed) {
-      hold += H;
-      if (hold > C.course.goalHold) break;
-    } else hold = 0;
-    if (Math.abs(sim.chassis.getAngle()) > 1.4) { events.push('ROLLED OVER'); break; }
+    const r = result(sim);
+    console.log(`worker: events=[${[...new Set(ev)].join(',')}] rear wheel travel min=${minTravel.toFixed(3)} (rest ~0.13) bounce vy box=${maxBoxVy.toFixed(2)} ball=${maxBallVy.toFixed(2)} delivered ${r.delivered}/${r.total}`);
   }
-  events.forEach((e) => console.log('   ', e));
-  summary(sim, 'END');
-  return sim;
-}
-
-// cruise at target speed, slow for the magnet, brake into the goal
-const careful = (vmax) => (sim, x) => {
-  const v = sim.speed();
-  let target = vmax;
-  if (x > C.course.goalStart - 25) target = Math.min(target, Math.max(0, (C.course.goalStart + 12 - x) * 0.35));
-  // gentle: hold the pedal below target, coast above it, brake only when clearly too fast
-  return { throttle: v < target - 0.2, brake: v > target + 1.5 };
-};
-// floor it, then slam the brakes
-const reckless = (sim, x) => {
-  if (x > C.course.goalStart + 4) return { throttle: false, brake: true };
-  return { throttle: true, brake: false };
-};
-
-function freshLoaded(layout) {
-  const sim = new Phys.Sim(null);
-  Layout.apply(sim, layout || C.recommended);
-  sim.settle(2.5);
-  // depart from a clean rebuild, exactly like the game does
-  return new Phys.Sim(sim.snapshot());
-}
-
-const scenario = process.argv[2] || 'all';
-if (scenario === 'empty' || scenario === 'all') {
-  const sim = new Phys.Sim(null);
-  const j = sim.wheelJoints.map((w) => w.getJointTranslation().toFixed(3));
-  console.log('empty truck chassis y', sim.chassis.getPosition().y.toFixed(3), 'wheel travel', j, 'mass', sim.chassis.getMass().toFixed(0));
-  drive(sim, careful(6), 120, false);
-}
-if (scenario === 'recommended' || scenario === 'all') {
-  const sim = freshLoaded();
-  console.log('recommended: loaded', sim.loadedItems().length, 'pile top', pileTop(sim).toFixed(2), 'wheel travel', sim.wheelJoints.map((w) => w.getJointTranslation().toFixed(3)));
-  const sup = sim.supportedIds();
-  console.log('  settled on truck:', sup.size, 'belts', sim.belts.length);
-  for (const v of [3, 4, 5, 6, 7, 8]) { console.log(`careful ${v} m/s:`); drive(freshLoaded(), careful(v), 150, false); }
-  console.log('reckless:'); drive(freshLoaded(), reckless, 150, false);
-}
-if (scenario === 'inertia' || scenario === 'all') {
-  // a lone box on the bed: launch pushes it back, braking pushes it forward
-  const sim = new Phys.Sim(null);
-  const x0 = sim.chassis.getPosition().x;
-  const id = 11;
-  const y = sim.dropHeight(id, x0 - 0.6, 0);
-  sim.placeItem(id, x0 - 0.6, y, 0);
-  sim.settle(1);
-  sim.phase = 'driving';
-  const rel = () => sim.items[id].body.getPosition().x - sim.chassis.getPosition().x;
-  const r0 = rel();
-  sim.controls = { throttle: true, brake: false };
-  for (let t = 0; t < 1.2; t += H) sim.step(H);
-  const r1 = rel();
-  sim.controls = { throttle: false, brake: true };
-  for (let t = 0; t < 1.5; t += H) sim.step(H);
-  const r2 = rel();
-  console.log(`inertia: box rel x start ${r0.toFixed(3)} after launch ${r1.toFixed(3)} after brake ${r2.toFixed(3)} (launch should move back, brake forward)`);
-}
-if (scenario === 'magnet' || scenario === 'all') {
-  const sim = freshLoaded();
-  sim.phase = 'driving';
-  let maxF = {};
-  sim.controls = { throttle: false, brake: true };
-  // teleport-free check: run the oncoming truck past a parked loaded truck
-  sim.magnet.moving = true;
-  sim.magnet.x = sim.chassis.getPosition().x + 25;
-  for (let t = 0; t < 10; t += H) {
-    sim.step(H);
-    for (const it of sim.items) if (it.magnetForce) maxF[it.spec.name] = Math.max(maxF[it.spec.name] || 0, it.magnetForce);
+  // crane: wait under it -> caught; drive through -> missed
+  for (const wait of [true, false]) {
+    const st = unitStage([{ type: 'box', box: 'L' }], { crane: true });
+    st.course = [['flat', 30], ['mark', 'crane'], ['flat', 200], ['goal', 30]];
+    st.bonus = { type: 'bonus' };
+    let sim = new Phys.Sim(st, null);
+    place(sim, 0, 0.4);
+    sim.settle(1);
+    sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+    const ev = [];
+    for (let t = 0; t < 20; t += H) {
+      const bed = sim.chassis.getWorldPoint(pl.Vec2(Phys.BED.center, 0)).x;
+      if (wait) sim.controls = sim.crane.state !== 'released' && bed > sim.crane.x - 0.3 ? { throttle: false, brake: true } : { throttle: sim.speed() < 2, brake: false };
+      else sim.controls = { throttle: true, brake: false };
+      sim.step(H);
+      ev.push(...sim.events.splice(0).map((e) => e.type));
+      if (!wait && sim.chassis.getPosition().x > 60) break;
+    }
+    const r = result(sim);
+    console.log(`crane ${wait ? 'wait ' : 'drive'}: events=[${[...new Set(ev)].join(',')}] bonus on truck=${r.bonus}`);
   }
-  console.log('magnet: max force by item type', JSON.stringify(maxF));
-  summary(sim, '  after pass (parked)');
 }
-if (scenario === 'heavytop' || scenario === 'all') {
-  const run = (order, label) => {
-    const sim = new Phys.Sim(null);
-    Layout.apply(sim, { items: order, belts: [] });
-    sim.settle(2);
-    const s2 = new Phys.Sim(sim.snapshot());
-    console.log(label);
-    drive(s2, careful(6.5), 150, false);
-  };
-  // same items, fridge on the bottom vs on top of the boxes
-  run([{ id: 0, x: 0.5, a: 90 }, { id: 11, x: 0.4, a: 0 }, { id: 12, x: 1.1, a: 0 }, { id: 13, x: 0.75, a: 0 }], 'heavy bottom:');
-  run([{ id: 11, x: 0.4, a: 0 }, { id: 12, x: 1.1, a: 0 }, { id: 13, x: 0.75, a: 0 }, { id: 0, x: 0.75, a: 0 }], 'heavy top:');
+
+// ------------------------------------------------------------------ stage runs
+if (scenario === 'stage') {
+  const n = Number(process.argv[3] || 1);
+  const st = STAGE(n);
+  const lay = st.recommended;
+  const s0 = loaded(st, lay);
+  console.log(`stage ${n}: loaded ${s0.loadedItems().length}/${st.manifest.length}, course ${s0.course.length.toFixed(0)} m`);
+  for (const [label, pol] of [['floored', floored], ['careful 4', careful(4)], ['careful 6', careful(6)], ['careful 5 +stops', careful(5, { stopForWorker: true, waitCrane: true })]]) {
+    console.log(label + ':');
+    drive(loaded(st, lay), pol);
+  }
 }
 
 // dump poses for tools/snap.py (renders a PNG of the scene)
@@ -152,8 +259,13 @@ function dumpScene(sim, file) {
   sim.wheels.forEach((w) => out.push({ sprite: 'wheel', x: w.getPosition().x, y: w.getPosition().y, a: w.getAngle(), w: C.truck.wheelRadius * 2 * 269 / 262, h: C.truck.wheelRadius * 2 * 269 / 262 }));
   const c = sim.chassis;
   out.push({ sprite: 'truck', x: c.getPosition().x, y: c.getPosition().y, a: c.getAngle(), w: T.w / Phys.TS, h: T.h / Phys.TS });
-  for (const it of sim.loadedItems()) out.push({ sprite: it.spec.sprite, x: it.body.getPosition().x, y: it.body.getPosition().y, a: it.body.getAngle(), w: it.spec.size[0], h: it.spec.size[1] });
-  const belts = sim.belts.map((b) => { const p = sim.hookWorld(b.hook); const q = sim.items[b.id].body.getWorldPoint(b.local); return [p.x, p.y, q.x, q.y]; });
+  for (const it of sim.allItems()) {
+    if (!it.bodies) continue;
+    for (const [name, b] of Object.entries(it.bodies)) {
+      for (const d of it.spec.draw[name]) out.push({ sprite: d.sprite, x: b.getPosition().x, y: b.getPosition().y, a: b.getAngle(), w: d.w, h: d.h });
+    }
+  }
+  const belts = sim.belts.map((b) => { const p = sim.hookWorld(b.hook); const q = sim.beltBody(b).getWorldPoint(b.local); return [p.x, p.y, q.x, q.y]; });
   const polys = [];
   for (let b = sim.world.getBodyList(); b; b = b.getNext()) {
     if (b === sim.ground) continue;
@@ -162,88 +274,120 @@ function dumpScene(sim, file) {
       if (sh.getType() === 'polygon') polys.push(sh.m_vertices.map((v) => { const p = b.getWorldPoint(v); return [p.x, p.y]; }));
     }
   }
-  fs.writeFileSync(file, JSON.stringify({ cx: c.getPosition().x, items: out, belts, polys }));
+  fs.writeFileSync(file, JSON.stringify({ cx: c.getPosition().x, gy: sim.groundY(c.getPosition().x), items: out, belts, polys }));
 }
 if (scenario === 'snap') {
-  const sim = new Phys.Sim(null);
-  Layout.apply(sim, C.recommended);
-  dumpScene(sim, process.argv[3] + '.placed.json');
-  sim.settle(3);
-  dumpScene(sim, process.argv[3] + '.settled.json');
-  const s2 = new Phys.Sim(sim.snapshot());
-  const until = Number(process.argv[4] || 0);
+  const n = Number(process.argv[3] || 1);
+  const st = STAGE(n);
+  const sim = new Phys.Sim(st, null);
+  Layout.apply(sim, st.recommended);
+  dumpScene(sim, process.argv[4] + '.placed.json');
+  sim.settle(2.5);
+  dumpScene(sim, process.argv[4] + '.settled.json');
+  const until = Number(process.argv[5] || 0);
   if (until) {
-    s2.phase = 'driving';
-    const pol = process.argv[5] === 'reckless' ? reckless : careful(Number(process.argv[5] || 6));
-    while (s2.chassis.getPosition().x < until && s2.time < 100) { Object.assign(s2.controls, pol(s2, s2.chassis.getPosition().x)); s2.step(H); }
-    dumpScene(s2, process.argv[3] + '.drive.json');
-    summary(s2, 'snap drive');
+    const s2 = loaded(st, st.recommended);
+    const pol = process.argv[6] === 'floored' ? floored : careful(Number(process.argv[6] || 5));
+    while (s2.chassis.getPosition().x < until && s2.driveTime < 150) { Object.assign(s2.controls, pol(s2, s2.chassis.getPosition().x)); s2.step(H); s2.events.length = 0; }
+    dumpScene(s2, process.argv[4] + '.drive.json');
+  }
+}
+
+module.exports = { loaded, drive, careful, floored };
+if (scenario === 'shock') {
+  // how big are jolts in ordinary driving vs. abuse? (box on the bed)
+  const mk = () => { const st = unitStage([{ type: 'box', box: 'M' }]); st.course = [['flat', 30], ['bump', 0.14, 1.0], ['flat', 40], ['crest', 2.3, 24, 13], ['flat', 60], ['goal', 30]]; let s = new Phys.Sim(st, null); place(s, 0, 1.0); s.settle(1); s = new Phys.Sim(st, s.snapshot()); s.startDriving(); return s; };
+  const track = (sim, secs, ctrl) => { let m = 0; const at = []; for (let t = 0; t < secs; t += H) { Object.assign(sim.controls, ctrl(sim)); sim.step(H); const sh = sim.item(0).st.shock; if (sim.driveTime > 0.6 && sh > m) { m = sh; } } return m; };
+  console.log('gentle launch+cruise 3 m/s to x=30:', track(mk(), 6, (s) => ({ throttle: s.speed() < 3, brake: false })).toFixed(0));
+  console.log('floor to x=25 then hard brake:', track(mk(), 6, (s) => s.chassis.getPosition().x < 25 ? { throttle: true, brake: false } : { throttle: false, brake: true }).toFixed(0));
+  for (const v of [3, 5, 7, 9]) console.log(`bump at ${v} m/s:`, (() => { const s = mk(); let m = 0; for (let t = 0; t < 14 && s.chassis.getPosition().x < 30; t += H) { s.controls = { throttle: s.speed() < v, brake: false }; s.step(H); if (s.chassis.getPosition().x > 12) m = Math.max(m, s.item(0).st.shock); } return m.toFixed(0); })());
+  for (const v of [2.5, 4, 6, 8.5]) console.log(`crest at ${v} m/s:`, (() => { const s = mk(); let m = 0; for (let t = 0; t < 30 && s.chassis.getPosition().x < 115; t += H) { s.controls = { throttle: s.speed() < v, brake: false }; s.step(H); if (s.chassis.getPosition().x > 50) m = Math.max(m, s.item(0).st.shock); } return m.toFixed(0); })());
+}
+if (scenario === 'catdbg') {
+  const st = unitStage([{ type: 'cat' }, { type: 'box', box: 'L' }, { type: 'box', box: 'M' }]);
+  let sim = new Phys.Sim(st, null);
+  place(sim, 0, 0.6); place(sim, 1, 1.42); place(sim, 2, 1.42); sim.settle(1);
+  sim = new Phys.Sim(st, sim.snapshot()); sim.startDriving();
+  const j = sim.item(0).joints.arm;
+  for (let t = 0; t < 5.2; t += H) { sim.controls = { throttle: false, brake: true }; sim.step(H); if (Math.abs(t - 4.2) < H / 2) dumpScene(sim, process.argv[3]); if (Math.round(t * 120) % 12 === 0 && t > 3.5) console.log(t.toFixed(2), 'arm', j.getJointAngle().toFixed(2), 'speed', j.getMotorSpeed().toFixed(2), 'motorOn', j.isMotorEnabled(), 'limit', j.isLimitEnabled(), j.getLowerLimit().toFixed(2), 'torque', j.getMotorTorque(120).toFixed(1), 'box x', sim.chassis.getLocalPoint(sim.item(1).bodies.root.getPosition()).x.toFixed(2)); }
+  const arm = sim.item(0).bodies.arm; const p = arm.getPosition(); console.log('arm pos', p.x.toFixed(2), p.y.toFixed(2), 'cat', sim.item(0).bodies.root.getPosition().x.toFixed(2));
+}
+if (scenario === 'shockmap') {
+  // max jolt felt by one item along the course, per cruise speed: where would a catch pop?
+  const n = Number(process.argv[3] || 1), id = Number(process.argv[4] || 0);
+  const st = STAGE(n);
+  for (const v of [2, 3, 4, 5, 6, 8]) {
+    const sim = loaded(st, st.recommended);
+    sim.item(id).spec = Object.assign({}, sim.item(id).spec, { latchShock: 1e9, latchTilt: 1e9 }); // observe only
+    const bins = {};
+    const pol = (s) => ({ throttle: s.speed() < v, brake: s.speed() > v + 1.2 });
+    while (sim.driveTime < 120 && sim.chassis.getPosition().x < sim.course.goalStart) {
+      Object.assign(sim.controls, pol(sim));
+      sim.step(H); sim.events.length = 0;
+      const k = Math.floor(sim.chassis.getPosition().x / 20) * 20;
+      bins[k] = Math.max(bins[k] || 0, sim.item(id).st.shock);
+    }
+    console.log(`v=${v}: ` + Object.entries(bins).map(([k, m]) => `${k}:${m.toFixed(0)}`).join(' '));
+  }
+}
+if (scenario === 'air') {
+  const n = Number(process.argv[3] || 2);
+  const st = STAGE(n);
+  for (const v of [1.5, 2.5, 3, 5, 7, 9]) {
+    const sim = loaded(st, process.argv[4] === 'reco' ? st.recommended : { items: [], belts: [] });
+    let air = 0, maxAir = 0, landV = 0, maxSpd = 0;
+    const top = sim.course.marks.crestTop;
+    while (sim.driveTime < 100 && sim.chassis.getPosition().x < top + 30) {
+      sim.controls = { throttle: sim.speed() < v, brake: false };
+      sim.step(H); sim.events.length = 0;
+      const x = sim.chassis.getPosition().x;
+      if (x > top - 20) maxSpd = Math.max(maxSpd, sim.speed());
+      const touching = sim.wheels.some((w) => { for (let ce = w.getContactList(); ce; ce = ce.next) if (ce.contact.isTouching() && ce.other === sim.ground) return true; return false; });
+      if (!touching && x > top - 5) { air += H; maxAir = Math.max(maxAir, air); landV = Math.min(landV, sim.chassis.getLinearVelocity().y); } else air = 0;
+    }
+    console.log(`v=${v}: reached x=${sim.chassis.getPosition().x.toFixed(1)} (top ${top.toFixed(1)}) t=${sim.driveTime.toFixed(0)} max airtime ${maxAir.toFixed(2)}s, min vy ${landV.toFixed(1)}, max speed near crest ${maxSpd.toFixed(1)}`);
   }
 }
 if (scenario === 'trace') {
-  const sim = freshLoaded();
-  sim.phase = 'driving';
-  const id = Number(process.argv[3] || 11);
-  const pol = careful(Number(process.argv[4] || 3.5));
-  for (let i = 0; i < 400; i++) {
-    Object.assign(sim.controls, pol(sim, sim.chassis.getPosition().x));
-    sim.step(H);
-    if (i % 20 === 0) {
-      const b = sim.items[id].body, ch = sim.chassis;
-      const l = ch.getLocalPoint(b.getPosition());
-      console.log(`t=${sim.time.toFixed(2)} v=${sim.speed().toFixed(2)} thr=${sim.throttle.toFixed(2)} brk=${sim.controls.brake} pitch=${(ch.getAngle() * 57.3).toFixed(2)} item local=(${l.x.toFixed(2)},${l.y.toFixed(2)}) ang=${((b.getAngle() - ch.getAngle()) * 57.3).toFixed(1)} fallen=${sim.items[id].fallen}`);
-    }
+  const n = Number(process.argv[3] || 2), v = Number(process.argv[4] || 4);
+  const st = STAGE(n);
+  const sim = loaded(st, st.recommended);
+  const pol = careful(v);
+  let last = 0;
+  while (sim.driveTime < 60) {
+    const x = sim.chassis.getPosition().x;
+    const c = pol(sim, x);
+    Object.assign(sim.controls, c);
+    sim.step(H); sim.events.length = 0;
+    if (sim.driveTime - last > 1 && x > 40) { last = sim.driveTime; console.log(`t=${sim.driveTime.toFixed(0)} x=${x.toFixed(2)} v=${sim.speed().toFixed(2)} thr=${c.throttle} brk=${c.brake} ang=${(sim.chassis.getAngle() * 57.3).toFixed(1)} wheelsW=${sim.wheels.map((w) => w.getAngularVelocity().toFixed(1))}`); }
   }
 }
-if (scenario === 'magnet2') {
-  // the recommended pile with the fridge strap moved elsewhere vs kept
-  for (const [label, belts] of [['fridge strapped', C.recommended.belts], ['fridge loose', C.recommended.belts.filter((b) => b.id !== 0)]]) {
-    for (const v of [3, 5, 7]) {
-      const sim = freshLoaded({ items: C.recommended.items, belts });
-      sim.phase = 'driving';
-      const pol = careful(v);
-      let maxF = 0;
-      const startPos = () => sim.chassis.getLocalPoint(sim.items[0].body.getPosition());
-      let p0 = null;
-      let fellAt = null;
-      while (sim.time < 150) {
-        const x = sim.chassis.getPosition().x;
-        // cruise at v through the magnet zone, otherwise 5 m/s
-        Object.assign(sim.controls, (x > 200 && x < 270 ? pol : careful(5))(sim, x));
-        sim.step(H);
-        if (x > 200 && !p0) p0 = startPos();
-        maxF = Math.max(maxF, sim.items[0].magnetForce);
-        if (sim.items[0].fallen && fellAt == null) fellAt = x;
-        if (x > 290) break;
-      }
-      const p1 = sim.items[0].fallen ? null : startPos();
-      console.log(`${label} @${v}m/s: fridge maxF=${maxF.toFixed(0)}N fallen=${sim.items[0].fallen}${fellAt != null ? '@x=' + fellAt.toFixed(0) : ''} moved=${p1 ? Math.hypot(p1.x - p0.x, p1.y - p0.y).toFixed(2) + 'm' : '-'}; total fallen ${sim.loadedItems().filter((i) => i.fallen).length}`);
-    }
-  }
+if (scenario === 'stuckdbg') {
+  // what is touching the truck's wheels / frame when it stops?
+  const n = Number(process.argv[3] || 3), v = Number(process.argv[4] || 7);
+  const st = STAGE(n);
+  const sim = loaded(st, st.recommended);
+  while (sim.driveTime < 40) { sim.controls = { throttle: sim.speed() < v, brake: false }; sim.step(H); for (const e of sim.events.splice(0)) console.log('ev', e.type, e.id, sim.chassis.getPosition().x.toFixed(1)); }
+  console.log('x', sim.chassis.getPosition().x.toFixed(2), 'ang', (sim.chassis.getAngle() * 57.3).toFixed(0));
+  for (const b of [sim.chassis, ...sim.wheels]) for (let ce = b.getContactList(); ce; ce = ce.next) if (ce.contact.isTouching()) { const ud = ce.other.getUserData(); console.log(b.getUserData().kind, 'touches', ud.kind, ud.item ? ud.item.spec.name + ':' + ud.part : ''); }
+  dumpScene(sim, process.argv[5]);
 }
-if (scenario === 'magnet3' || scenario === 'magnet4') {
-  // magnet3: fridge standing at the front of the bed, boxes behind it
-  // magnet4: fridge lying on top of a row of boxes
-  const items = scenario === 'magnet3'
-    ? [{ id: 0, x: 1.72, a: 0 }, { id: 11, x: 0.4, a: 0 }, { id: 12, x: 1.05, a: 0 }, { id: 14, x: 0.7, a: 0 }]
-    : [{ id: 11, x: 0.35, a: 0 }, { id: 12, x: 1.0, a: 0 }, { id: 13, x: 1.65, a: 0 }, { id: 0, x: 1.0, a: 90 }];
-  for (const [label, belts] of [['no belt', []], ['belt', [{ hook: 2, id: 0, u: -0.2, v: 0.4 }]]]) {
-    for (const v of [3, 6, 8]) {
-      const sim = freshLoaded({ items, belts });
-      sim.phase = 'driving';
-      let maxF = 0, fellAt = null, p0 = null, maxMove = 0;
-      while (sim.time < 150) {
-        const x = sim.chassis.getPosition().x;
-        Object.assign(sim.controls, careful(x > 200 && x < 280 ? v : 5)(sim, x));
-        sim.step(H);
-        const it = sim.items[0];
-        if (x > 200 && !p0) p0 = sim.chassis.getLocalPoint(it.body.getPosition());
-        if (p0 && !it.fallen) { const l = sim.chassis.getLocalPoint(it.body.getPosition()); maxMove = Math.max(maxMove, Math.hypot(l.x - p0.x, l.y - p0.y)); }
-        maxF = Math.max(maxF, it.magnetForce);
-        if (it.fallen && fellAt == null) fellAt = x;
-        if (x > 290) break;
-      }
-      console.log(`${label} @${v}: maxF=${maxF.toFixed(0)} fridge fell ${fellAt != null ? 'at x=' + fellAt.toFixed(0) : 'no'} maxMove=${maxMove.toFixed(2)} totalFallen=${sim.loadedItems().filter((i) => i.fallen).length}`);
+if (scenario === 'cranedbg') {
+  const st = STAGE(3);
+  const sim = loaded(st, st.recommended);
+  const pol = careful(5, { waitCrane: true });
+  let last = 0;
+  while (sim.driveTime < 90) {
+    const x = sim.chassis.getPosition().x;
+    Object.assign(sim.controls, pol(sim, x));
+    sim.step(H); sim.events.length = 0;
+    if (sim.driveTime - last > 1 && x > 170) {
+      last = sim.driveTime;
+      const cr = sim.crane, b = sim.bonusItem.bodies.root;
+      const lug = b.getWorldPoint(sim.bonusItem.spec.lug), hp = cr.hook.getPosition();
+      const bed = sim.chassis.getWorldPoint(pl.Vec2(Phys.BED.center, 0)).x;
+      if (Math.round(sim.driveTime) === 56 && process.argv[3]) dumpScene(sim, process.argv[3]);
+      console.log(`t=${sim.driveTime.toFixed(0)} x=${x.toFixed(2)} bed=${bed.toFixed(2)} crane=${cr.x.toFixed(2)} v=${sim.speed().toFixed(2)} state=${cr.state} hookY=${(hp.y - sim.groundY(cr.x)).toFixed(2)} ropeDist=${pl.Vec2.distance(lug, hp).toFixed(3)} slackT=${cr.slackT.toFixed(2)}`);
     }
   }
 }

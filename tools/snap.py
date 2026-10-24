@@ -5,7 +5,7 @@ d = json.load(open(sys.argv[1]))
 PPM = int(sys.argv[3]) if len(sys.argv) > 3 else 90
 W, H = 900, 640
 img = Image.new('RGBA', (W, H), (200, 220, 235, 255))
-cx = d['cx']; base_y = 40
+cx = d['cx']; base_y = 40 - d.get('gy', 0) * PPM
 def sc(x, y):
     return (W/2 + (x-cx)*PPM, H - base_y - y*PPM)
 dr = ImageDraw.Draw(img)

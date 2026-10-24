@@ -417,3 +417,50 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
 }
+
+/* ---------------------------------------------------------------- stages, result extras */
+.stage-label {
+  margin: 0; flex: none; max-width: 22vw;
+  font-weight: 700; font-size: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.stages-card { width: min(100%, 560px); }
+.stage-list { display: flex; flex-direction: column; gap: 8px; }
+.stage-card {
+  display: grid; grid-template-columns: 48px 1fr; gap: 10px; align-items: center;
+  padding: 10px 12px;
+  border: 2px solid var(--ink); border-radius: 12px;
+  background: #fffdf6; box-shadow: 0 3px 0 var(--ink);
+  text-align: left;
+}
+.stage-card:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+.stage-card .no {
+  width: 44px; height: 44px; display: grid; place-items: center;
+  border: 2px solid var(--ink); border-radius: 10px; background: var(--tape);
+  font-family: var(--font-display); font-size: 22px;
+}
+.stage-card .body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stage-card .nm { font-family: var(--font-display); font-size: 17px; }
+.stage-card .bl { font-size: 12px; color: var(--ink-soft); line-height: 1.4; }
+.stage-card .rec { font-size: 12px; font-variant-numeric: tabular-nums; }
+.stage-card .st { color: var(--signal-dark); letter-spacing: 0.1em; margin-right: 6px; }
+.stage-card.locked { opacity: 0.5; box-shadow: none; }
+.stage-card.locked .no { background: var(--paper-2); }
+.card-item.special .nm::after { content: "仕掛け"; margin-left: 4px; padding: 0 4px; border-radius: 4px; background: var(--tape); font-size: 10px; vertical-align: 2px; }
+.res-stars { font-size: 22px; color: var(--signal-dark); letter-spacing: 0.08em; }
+.res-sub { margin: -6px 0 0; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.res-clear { margin: 0; font-weight: 700; font-size: 14px; }
+.res-notes { margin: 0; font-size: 12px; color: var(--ink-soft); }
+.res-notes:empty { display: none; }
+.eyebrow .best { margin-left: 8px; color: var(--ink); letter-spacing: 0.02em; }
+.stats { grid-template-columns: repeat(5, 1fr); }
+.res-items li.bonus { outline: 2px solid var(--tape); }
+.go.alt { background: var(--ink); }
+@media (max-height: 460px) {
+  .stage-label { display: none; }
+  .stage-card { padding: 6px 10px; }
+  .stage-card .bl { display: none; }
+}
+.card-item.special { border-color: var(--signal-dark); }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(3, 1fr); } }
+@media (max-height: 460px), (orientation: portrait) { .card-item.special .nm::after { display: none; } }

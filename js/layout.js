@@ -9,19 +9,21 @@
     const placed = [];
     for (const e of layout.items) {
       const it = sim.item(e.id);
-      if (it.body) continue;
+      if (!it || it.bodies) continue;
       const a = ((e.a || 0) * Math.PI) / 180 + ch.getAngle();
       const p = ch.getWorldPoint({ x: BED.rear + e.x, y: BED.floorY });
       const y = sim.dropHeight(e.id, p.x, a);
       if (y == null) continue;
-      sim.placeItem(e.id, p.x, y, a);
+      sim.placeItem(e.id, { x: p.x, y, a });
       placed.push(e.id);
     }
     for (const b of layout.belts || []) {
       const it = sim.item(b.id);
-      if (!it.body) continue;
+      const part = b.part || 'root';
+      if (!it.bodies || !it.bodies[part]) continue;
+      // u, v: fraction of the item size from the body's centre
       const [w, h] = it.spec.size;
-      sim.addBelt(b.hook, b.id, { x: b.u * w, y: b.v * h });
+      sim.addBelt(b.hook, b.id, part, { x: b.u * w, y: b.v * h });
     }
     return placed;
   }

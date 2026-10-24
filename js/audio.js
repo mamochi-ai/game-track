@@ -116,5 +116,18 @@
   };
   A.sad = function () { [392, 330, 262].forEach((f, i) => tone(f, f * 0.98, 0.3, 0.1, 'triangle', i * 0.18)); };
 
+  A.fanfareShort = function () { [523, 659, 784].forEach((f, i) => tone(f, f, 0.18, 0.1, 'triangle', i * 0.1)); };
+  A.latch = function () { tone(1400, 900, 0.06, 0.12, 'square'); burst(1800, 4, 0.06, 0.12); tone(420, 700, 0.18, 0.06, 'triangle', 0.05); };
+  A.roll = function () { burst(110, 1.2, 0.5, 0.25); tone(140, 90, 0.4, 0.08, 'sine'); };
+  A.unfold = function () { burst(600, 0.8, 0.5, 0.12, 'lowpass'); tone(200, 520, 0.45, 0.08, 'sawtooth'); };
+  A.bell = function () { tone(1760, 1740, 0.35, 0.08, 'sine'); tone(2640, 2620, 0.25, 0.04, 'sine'); };
+  A.robot = function () { [880, 1175, 1568].forEach((f, i) => tone(f, f, 0.09, 0.07, 'square', i * 0.09)); };
+  A.blip = function () { tone(1200, 900, 0.05, 0.03, 'square'); };
+  A.shimmer = function () { [1320, 1760, 2093, 2637].forEach((f, i) => tone(f, f * 1.01, 0.25, 0.05, 'sine', i * 0.06)); };
+  A.magnet = function () { tone(90, 70, 1.2, 0.16, 'sawtooth'); tone(180, 140, 1.2, 0.06, 'square'); };
+  A.hey = function () { tone(330, 520, 0.16, 0.1, 'triangle'); tone(520, 440, 0.2, 0.08, 'triangle', 0.16); };
+  A.boing = function () { tone(160, 620, 0.35, 0.14, 'sine'); };
+  A.beep = function () { tone(988, 988, 0.12, 0.08, 'square'); tone(988, 988, 0.12, 0.08, 'square', 0.2); };
+
   root.GameAudio = A;
 })(window);
