@@ -33,7 +33,7 @@ iPad / iPhone の Safari でタッチだけで遊べます。サーバー不要�
 ## 開発メモ
 
 ```sh
-python3 tools/cut_sprites.py assets/source/sheet.png# 切り出し（クリーム色トラックと磁石トラックは左右反転）
+python3 tools/cut_sprites.py assets/source/sheet.png  # 切り出し（クリーム色トラックと磁石トラックは左右反転）
 python3 tools/outlines.py                       # 透明部分を除いた輪郭から凸形状の当たり判定を生成
 python3 tools/build.py                          # dist/ を再生成
 node tools/sim.js all                           # 物理の回帰チェック（積み方・運転・磁石）
